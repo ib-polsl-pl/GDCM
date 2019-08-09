@@ -611,6 +611,8 @@ bool Anonymizer::BasicApplicationLevelConfidentialityProfile1()
 
   std::string encrypted_str = os.str();
 
+  std::cerr << "$$$: " << encrypted_str << '\n';
+
   // Note: 1. Content encryption may require that the content (the DICOM Data Set) be padded to a
   // multiple of some block size. This shall be performed according to the Content-encryption
   // Process defined in RFC-2630.
@@ -1009,6 +1011,8 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
         DataSet &nested = item.GetNestedDataSet();
         RecurseDataSet( nested );
         }
+      //ANIDEA if a sequence is empty, then remove the sequence
+      //additionally, whole the sequence to be encrypted
       }
     ds.Replace( de );
     }
