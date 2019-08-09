@@ -994,6 +994,10 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
     if( vr == VR::SQ )
       {
       sqi = de.GetValueAsSQ();
+      if (! sqi)
+        {
+        ds.Remove(de.GetTag());
+        }
       }
     if( sqi )
       {
@@ -1009,8 +1013,8 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
         DataSet &nested = item.GetNestedDataSet();
         RecurseDataSet( nested );
         }
+      ds.Replace( de );
       }
-    ds.Replace( de );
     }
 
 }
