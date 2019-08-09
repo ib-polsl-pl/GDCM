@@ -1013,8 +1013,8 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
         DataSet &nested = item.GetNestedDataSet();
         RecurseDataSet( nested );
         }
+      ds.Replace( de );
       }
-    ds.Replace( de );
     }
 
 }
