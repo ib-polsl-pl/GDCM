@@ -594,7 +594,6 @@ bool Anonymizer::BasicApplicationLevelConfidentialityProfile1()
           assert( de == encryptedds.GetDataElement( de.GetTag() ) );
           }
         }
-      //ANIDEA a może tutaj usunąć ten tag?
       }
     }
 }
@@ -710,13 +709,9 @@ bool Anonymizer::BasicApplicationLevelConfidentialityProfile1()
   //  if( ds.FindDataElement( tag ) ) BALCPProtect(F->GetDataSet(), tag);
   //  }
   // Check that root level sequence do not contains any of those attributes
-
   try
   {
-//    RecurseDataSet( F->GetDataSet() );
-    std::cout << "***\n" ; ds.Print(std::cout); std::cout <<"\n";
-    RecurseDataSet(ds);
-    std::cerr << "***\n" ; ds.Print(std::cerr); std::cerr <<"\n";
+    RecurseDataSet( F->GetDataSet() );
   }
   catch(std::exception &ex)
   {
@@ -1001,20 +996,14 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
     if( vr == VR::SQ )
       {
       sqi = de.GetValueAsSQ();
-      std::cout << "@@@ " <<de.GetTag()<<"\n";
-      //TUKEJ KURNA
       if (! sqi)
-      {
-          //TODO czyli sekwencja jest pusta, czyli ją wywalć!
-          ds.Remove(de.GetTag());
-      }
-
+        {
+        ds.Remove(de.GetTag());
+        }
       }
     if( sqi )
       {
-          std::cout << "@@@ " <<"YAYYYYY"<<"\n";
-          de.SetValue( *sqi ); // EXTREMELY IMPORTANT #2912092
-      std::cerr << "%%%DE: " << de << "\n";
+      de.SetValue( *sqi ); // EXTREMELY IMPORTANT #2912092
       de.SetVLToUndefined();
       assert( sqi->IsUndefinedLength() );
       //de.GetVL().SetToUndefined();
@@ -1025,24 +1014,11 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
         Item &item = sqi->GetItem( i );
         DataSet &nested = item.GetNestedDataSet();
         RecurseDataSet( nested );
-        std::cerr << "### "<< nested << "\n";
-        //TODO if item.isempty -> usun tak jak to jest niżej
         }
-//TODO ten ponizszy fragment to ma pojsc do fora, bo on znajduje itemy, ale te itemy są puste
-        if (sqi->GetNumberOfItems()==0)
-          {
-            std::cerr << "$$$: EMPTY SEQUENCE: "; sqi->Print(std::cerr);std::cerr<< "\n";
-            const Tag& tagToRemove = de.GetTag();
-            ds.Remove(tagToRemove);
-          }
-        else
-          {
-            std::cerr << "$$$: NOT EMPTY SEQUENCE: " << " " << n << " " ; sqi->Print(std::cerr);std::cerr<< "\n";
-            ds.Replace( de );
-          }
       //ANIDEA if a sequence is empty, then remove the sequence
       //additionally, whole the sequence to be encrypted
       }
+    ds.Replace( de );
     }
 
 }
