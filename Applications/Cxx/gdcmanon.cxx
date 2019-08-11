@@ -45,14 +45,14 @@ static void PrintVersion()
 
 
 static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, const char *outfilename,
-  std::vector<gdcm::Tag> const &empty_tags, std::vector<gdcm::Tag> const &remove_tags, std::vector< std::pair<gdcm::Tag, std::string> > const & replace_tags, bool continuemode = false)
+  std::vector<gdcm::Tag> const &empty_tags, std::vector<gdcm::Tag> const &remove_tags, std::vector< std::pair<gdcm::Tag, std::string> > const & replace_tags, bool continuemode = false, bool ignoreerrors=false)
 {
   gdcm::Reader reader;
   reader.SetFileName( filename );
   if( !reader.Read() )
     {
     std::cerr << "Could not read : " << filename;
-    if( continuemode )
+    if( continuemode || ignoreerrors )
       {
       std::cerr << " -> Skipping from anonymization process (continue mode)." << std::endl;
       return true;
@@ -94,7 +94,8 @@ static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, c
   gdcm::Writer writer;
   writer.SetFileName( outfilename );
   writer.SetFile( file );
-  if( !writer.Write() )
+  success = success && writer.Write();
+  if( !success )
     {
     std::cerr << "Could not Write : " << outfilename << std::endl;
     if( strcmp(filename,outfilename) != 0 )
@@ -105,20 +106,27 @@ static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, c
       {
       std::cerr << "gdcmanon just corrupted: " << filename << " for you (data lost)." << std::endl;
       }
-
-    return false;
+    if( ignoreerrors )
+      {
+      return true;
+      }
+    else
+      {
+      std::cerr << " -> Check [--ignore-errors] option for skipping errors." << std::endl;
+      return false;
+      }
     }
-  return success;
+  return true;
 }
 
-static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, std::vector<gdcm::Tag> const &encrypt_tags = {}, bool continuemode = false, bool removePrivateTags = false)
+static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, std::vector<gdcm::Tag> const &encrypt_tags = {}, bool continuemode = false, bool ignoreerrors=false, bool removePrivateTags = false)
 {
   gdcm::Reader reader;
   reader.SetFileName( filename );
   if( !reader.Read() )
     {
     std::cerr << "Could not read : " << filename << std::endl;
-    if( continuemode )
+    if( continuemode || ignoreerrors )
       {
       std::cerr << "Skipping from anonymization process (continue mode)." << std::endl;
       return true;
@@ -130,49 +138,68 @@ static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const
       }
     }
   gdcm::File &file = reader.GetFile();
+  bool success = true;
   gdcm::MediaStorage ms;
   ms.SetFromFile(file);
   if( !gdcm::Defs::GetIODNameFromMediaStorage(ms) )
     {
     std::cerr << "The Media Storage Type of your file is not supported: " << ms << std::endl;
     std::cerr << "Please report" << std::endl;
-    return false;
+    success = false;
+    if (! ignoreerrors)
+      {
+      return false;
+      }
     }
   anon.SetFile( file );
-
-  if( deidentify )
+  if (success)
     {
-    if( removePrivateTags )
+    if( deidentify )
       {
-      anon.RemovePrivateTags();
+      if( removePrivateTags )
+        {
+        success = success && anon.RemovePrivateTags();
+        }
+      //anon.RemoveRetired();
+      if (encrypt_tags.size() > 0 )
+        {
+        anon.AddTagsToBALCPA(encrypt_tags);
+        }
+      if( !anon.BasicApplicationLevelConfidentialityProfile( true ) )
+        {
+        std::cerr << "Could not De-indentify : " << filename << std::endl;
+        success = false;
+        if (! ignoreerrors)
+          {
+          return false;
+          }
+        }
       }
-    //anon.RemoveRetired();
-    if (encrypt_tags.size() > 0 )
+    else if ( reidentify )
       {
-      anon.AddTagsToBALCPA(encrypt_tags);
-      }
-    if( !anon.BasicApplicationLevelConfidentialityProfile( true ) )
-      {
-      std::cerr << "Could not De-indentify : " << filename << std::endl;
-      return false;
+      if( !anon.BasicApplicationLevelConfidentialityProfile( false ) )
+        {
+        std::cerr << "Could not Re-indentify : " << filename << std::endl;
+        success = false;
+        if (! ignoreerrors)
+          {
+          return false;
+          }
+        }
       }
     }
-  else if ( reidentify )
+  if (success)
     {
-    if( !anon.BasicApplicationLevelConfidentialityProfile( false ) )
-      {
-      std::cerr << "Could not Re-indentify : " << filename << std::endl;
-      return false;
-      }
+    gdcm::FileMetaInformation &fmi = file.GetHeader();
+    fmi.Clear();
+  
+    gdcm::Writer writer;
+    writer.SetFileName( outfilename );
+    writer.SetFile( file );
+    success = success && writer.Write();
     }
 
-  gdcm::FileMetaInformation &fmi = file.GetHeader();
-  fmi.Clear();
-
-  gdcm::Writer writer;
-  writer.SetFileName( outfilename );
-  writer.SetFile( file );
-  if( !writer.Write() )
+  if( !success )
     {
     std::cerr << "Could not Write : " << outfilename << std::endl;
     if( strcmp(filename,outfilename) != 0 )
@@ -183,10 +210,18 @@ static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const
       {
       std::cerr << "gdcmanon just corrupted: " << filename << " for you (data lost)." << std::endl;
       }
-
-    return false;
+    if( ignoreerrors )
+      {
+      return true;
+      }
+    else
+      {
+      std::cerr << " -> Check [--ignore-errors] option for skipping errors." << std::endl;
+      return false;
+      }
     }
   return true;
+
 }
 
 static bool GetRSAKeys(gdcm::CryptographicMessageSyntax &cms, const char *privpath = nullptr, const char *certpath = nullptr)
@@ -226,6 +261,7 @@ static void PrintHelp()
   std::cout << "  -o --output                 DICOM filename / directory" << std::endl;
   std::cout << "  -r --recursive              recursively process (sub-)directories." << std::endl;
   std::cout << "     --continue               Do not stop when file found is not DICOM." << std::endl;
+  std::cout << "     --ignore-errors          Do not stop when an error occurs." << std::endl;
   std::cout << "     --root-uid               Root UID." << std::endl;
   std::cout << "     --resources-path         Resources path." << std::endl;
   std::cout << "  -k --key                    Path to RSA Private Key." << std::endl;
@@ -319,6 +355,7 @@ int main(int argc, char *argv[])
   int version = 0;
   int recursive = 0;
   int continuemode = 0;
+  int ignoreerrors = 0;
   int empty_tag = 0;
   int remove_tag = 0;
   int encrypt_tag = 0;
@@ -374,6 +411,7 @@ int main(int argc, char *argv[])
         {"generate-uuids", no_argument, nullptr, 'g'},
         {"salt", required_argument, nullptr, 's'},
         {"remove-private-tags", no_argument, nullptr, 't'},
+        {"ignore-errors", no_argument, &ignoreerrors, 1},
 
         {nullptr, 0, nullptr, 0}
     };
@@ -877,7 +915,7 @@ int main(int argc, char *argv[])
       {
       const char *in  = filenames[i].c_str();
       const char *out = outfilenames[i].c_str();
-      if( !AnonymizeOneFileDumb(anon, in, out, empty_tags, remove_tags, replace_tags_value, continuemode>0 ))
+      if( !AnonymizeOneFileDumb(anon, in, out, empty_tags, remove_tags, replace_tags_value, continuemode>0, ignoreerrors!=0 ))
         {
         //std::cerr << "Could not anonymize: " << in << std::endl;
         delete cms_ptr;
@@ -891,7 +929,7 @@ int main(int argc, char *argv[])
       {
       const char *in  = filenames[i].c_str();
       const char *out = outfilenames[i].c_str();
-      if( !AnonymizeOneFile(anon, in, out, encrypt_tags, continuemode>0, remove_private_tags!=0 ))
+      if( !AnonymizeOneFile(anon, in, out, encrypt_tags, continuemode>0, ignoreerrors!=0, remove_private_tags!=0 ))
         {
         //std::cerr << "Could not anonymize: " << in << std::endl;
         delete cms_ptr;
