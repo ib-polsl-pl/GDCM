@@ -434,9 +434,22 @@ std::vector<Tag> Anonymizer::GetBasicApplicationLevelConfidentialityProfileAttri
   return BasicApplicationLevelConfidentialityProfileAttributes;
 }
 
-void Anonymizer::AddTagToBALCPA(Tag tag)
+void Anonymizer::AddTagToBALCPA(const Tag& tag)
 {
   BasicApplicationLevelConfidentialityProfileAttributes.push_back(tag);
+}
+
+void Anonymizer::RemoveTagFromBALCPA(const Tag& tag)
+{
+    auto it = std::find(BasicApplicationLevelConfidentialityProfileAttributes.begin(),
+                        BasicApplicationLevelConfidentialityProfileAttributes.end(),
+                        tag);
+    if (it != BasicApplicationLevelConfidentialityProfileAttributes.end()) {
+            BasicApplicationLevelConfidentialityProfileAttributes.erase(it);
+    }
+    else {
+        gdcmWarningMacro((tag.PrintAsContinuousString() + " was not scheduled for removing. Ignoring this Tag.").c_str());
+    }
 }
 
 void Anonymizer::AddTagsToBALCPA(const std::vector<Tag>& tags)
@@ -453,6 +466,14 @@ void Anonymizer::AddTagsToBALCPA(const std::vector<Tag>& tags)
       {
       gdcmWarningMacro((ptr.PrintAsContinuousString() + " already scheduled for removing. Ignoring this Tag.").c_str());
       }
+    }
+}
+
+void Anonymizer::RemoveTagsFromBALCPA(const std::vector<Tag>& tags)
+{
+    for (const auto& ptr : tags)
+    {
+        RemoveTagFromBALCPA(ptr);
     }
 }
 

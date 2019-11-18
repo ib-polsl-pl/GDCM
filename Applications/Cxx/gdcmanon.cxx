@@ -28,6 +28,8 @@
 #include "gdcmGlobal.h"
 #include "gdcmDefs.h"
 #include "gdcmDirectory.h"
+#include "gdcmDict.h"
+#include "gdcmDicts.h"
 
 #include <getopt.h>
 
@@ -43,6 +45,24 @@ static void PrintVersion()
   int deidentify = 0;
   int reidentify = 0;
 
+static std::string getTagName( const gdcm::Tag & tag )
+{
+    std::string retVal;
+
+    const gdcm::Global& g = gdcm::Global::GetInstance();
+    const gdcm::Dicts &dicts = g.GetDicts();
+    const gdcm::Dict &pubdict = dicts.GetPublicDict();
+    gdcm::DictEntry ent = pubdict.GetDictEntry(tag);
+
+    if (ent.GetVR() != gdcm::VR::INVALID ) {
+        retVal = ent.GetName();
+    }
+    else {
+        retVal = "UNKNOWN OR INVALID VR";
+    }
+
+    return retVal;
+}
 
 static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, const char *outfilename,
   std::vector<gdcm::Tag> const &empty_tags, std::vector<gdcm::Tag> const &remove_tags, std::vector< std::pair<gdcm::Tag, std::string> > const & replace_tags, bool continuemode = false, bool ignoreerrors=false)
@@ -119,7 +139,7 @@ static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, c
   return true;
 }
 
-static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, std::vector<gdcm::Tag> const &encrypt_tags = {}, bool continuemode = false, bool ignoreerrors=false, bool removePrivateTags = false)
+static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, std::vector<gdcm::Tag> const &encrypt_tags = {}, std::vector<gdcm::Tag> const &preserve_tags = {}, bool continuemode = false, bool ignoreerrors=false, bool removePrivateTags = false)
 {
   gdcm::Reader reader;
   reader.SetFileName( filename );
@@ -164,6 +184,10 @@ static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const
       if (encrypt_tags.size() > 0 )
         {
         anon.AddTagsToBALCPA(encrypt_tags);
+        }
+      if (preserve_tags.size() > 0)
+        {
+        anon.RemoveTagsFromBALCPA(preserve_tags);
         }
       if( !anon.BasicApplicationLevelConfidentialityProfile( true ) )
         {
@@ -269,6 +293,9 @@ static void PrintHelp()
   std::cout << "  -p --password               Encryption passphrase." << std::endl;
   std::cout << "  -n --generate-dummy-names   Generate PatientName, StudyID etc." << std::endl;
   std::cout << "  -t --remove-private-tags    Remove all Private Tags." << std::endl;
+  std::cout << "  -N --encrypt-tag %d,%d      additional DICOM tag(s) to encrypt" << std::endl;
+  std::cout << "  -T --preserve-tag %d,%d     DICOM tag to preserve from anonymization" << std::endl;
+  std::cout << "  -P --print-tags-to-anon     Print DICOM tags scheduled to anonymization (encryption)" << std::endl;
   std::cout << "Crypto Library Options:" << std::endl;
   std::cout << "  --crypto=" << std::endl;
   std::cout << "           openssl            OpenSSL (default on non-Windows systems)." << std::endl;
@@ -285,7 +312,6 @@ static void PrintHelp()
   std::cout << "     --empty   %d,%d          DICOM tag(s) to empty" << std::endl;
   std::cout << "     --remove  %d,%d          DICOM tag(s) to remove" << std::endl;
   std::cout << "     --replace %d,%d=%s       DICOM tag(s) to replace" << std::endl;
-  std::cout << "     --encrypt-tag %d,%d      additional DICOM tag(s) to encrypt" << std::endl;
   std::cout << "General Options:" << std::endl;
   std::cout << "  -V --verbose                more verbose (warning+error)." << std::endl;
   std::cout << "  -W --warning                print warning info." << std::endl;
@@ -367,6 +393,7 @@ int main(int argc, char *argv[])
   std::vector<gdcm::Tag> empty_tags;
   std::vector<gdcm::Tag> remove_tags;
   std::vector<gdcm::Tag> encrypt_tags;
+  std::vector<gdcm::Tag> preserve_tags;
   std::vector< std::pair<gdcm::Tag, std::string> > replace_tags_value;
   gdcm::Tag tag;
   gdcm::CryptoFactory::CryptoLib crypto_lib;
@@ -406,17 +433,19 @@ int main(int argc, char *argv[])
         {"help", no_argument, nullptr, 'h'},
         {"version", no_argument, nullptr, 'v'},
 
-        {"encrypt-tag", required_argument, &encrypt_tag, 1}, //26
+        {"encrypt-tag", required_argument, &encrypt_tag, 'N'},
+        {"preserve-tag", required_argument, &encrypt_tag, 'T'},
         {"generate-dummy-names", no_argument, &generate_dummy_names, 'n'},
         {"generate-uuids", no_argument, nullptr, 'g'},
         {"salt", required_argument, nullptr, 's'},
         {"remove-private-tags", no_argument, nullptr, 't'},
         {"ignore-errors", no_argument, &ignoreerrors, 1},
+        {"print-tags-to-anon", no_argument, nullptr, 'P'},
 
         {nullptr, 0, nullptr, 0}
     };
 
-    c = getopt_long (argc, argv, "i:o:rdek:c:p:VWDEhvngts:",
+    c = getopt_long (argc, argv, "i:o:rdek:c:p:VWDEhvngts:T:N:P",
       long_options, &option_index);
     if (c == -1)
       {
@@ -527,16 +556,6 @@ int main(int argc, char *argv[])
               return 1;
               }
             }
-            else if( option_index == 26 ) /* encrypt_tags */
-            {
-              assert( strcmp(s, "encrypt-tag") == 0 );
-              if( !tag.ReadFromCommaSeparatedString(optarg) )
-              {
-                std::cerr << "Could not read Tag: " << optarg << std::endl;
-                return 1;
-              }
-              encrypt_tags.push_back( tag );
-            }
           //printf (" with arg %s", optarg);
           }
         //printf ("\n");
@@ -625,6 +644,34 @@ int main(int argc, char *argv[])
         }
       salt = optarg;
       break;
+
+    case 'N':
+      if( !tag.ReadFromCommaSeparatedString(optarg) )
+      {
+          std::cerr << "Could not read Tag: " << optarg << std::endl;
+          return 1;
+      }
+      encrypt_tags.push_back( tag );
+      break;
+
+    case 'T':
+      if( !tag.ReadFromCommaSeparatedString(optarg) )
+      {
+        std::cerr << "Could not read Tag: " << optarg << std::endl;
+        return 1;
+      }
+      preserve_tags.push_back( tag );
+      break;
+
+    case 'P':
+      {
+          std::cerr << "Default list of Tags scheduled for anonymization (ignores -N or -T flags).\n";
+          for (const auto& i: gdcm::Anonymizer::GetBasicApplicationLevelConfidentialityProfileAttributes()) {
+              std::cerr << i.PrintAsPipeSeparatedString() << "    " << getTagName(i) << '\n';
+          }
+
+          std::cerr << '\n';
+      }
 
     case '?':
       break;
@@ -929,7 +976,7 @@ int main(int argc, char *argv[])
       {
       const char *in  = filenames[i].c_str();
       const char *out = outfilenames[i].c_str();
-      if( !AnonymizeOneFile(anon, in, out, encrypt_tags, continuemode>0, ignoreerrors!=0, remove_private_tags!=0 ))
+      if( !AnonymizeOneFile(anon, in, out, encrypt_tags, preserve_tags, continuemode>0, ignoreerrors!=0, remove_private_tags!=0 ))
         {
         //std::cerr << "Could not anonymize: " << in << std::endl;
         delete cms_ptr;

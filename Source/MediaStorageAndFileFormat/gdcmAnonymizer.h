@@ -140,10 +140,16 @@ public:
   static std::vector<Tag> GetBasicApplicationLevelConfidentialityProfileAttributes();
 
   /// Add one tag to the list of Tag that will be considered during anonymization
-  static void AddTagToBALCPA(Tag tag);
+  static void AddTagToBALCPA(const Tag& tag);
+
+  /// Remove one tag from the list of Tags that will be considered during anonymization
+  static void RemoveTagFromBALCPA(const Tag& tag);
 
   /// Add some tags to the list of Tag that will be considered during anonymization
   static void AddTagsToBALCPA(const std::vector<Tag>& tags);
+
+  /// Remove some tags from the list of Tag that will be considered during anonymization
+  static void RemoveTagsFromBALCPA(const std::vector<Tag>& tags);
 
   /// Clear the internal mapping of real UIDs to generated UIDs
   /// \warning the mapping is definitely lost
