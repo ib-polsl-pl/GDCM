@@ -96,6 +96,7 @@
 #include "gdcmSubject.h"
 #include "gdcmCommand.h"
 #include "gdcmAnonymizer.h"
+
 #include "gdcmFileAnonymizer.h"
 #include "gdcmFileStreamer.h"
 #include "gdcmSystem.h"
@@ -269,6 +270,8 @@ EXTEND_CLASS_PRINT(gdcm::MediaStorage)
 //%rename(__getattr__) gdcm::Tag::operator[];
 %include "gdcmTag.h"
 EXTEND_CLASS_PRINT(gdcm::Tag)
+//%template (TagsType) std::vector<gdcm::Tag>;
+%template(TagArrayType) std::vector< gdcm::Tag >;
 %include "gdcmPrivateTag.h"
 EXTEND_CLASS_PRINT(gdcm::PrivateTag)
 
@@ -804,7 +807,7 @@ EXTEND_CLASS_PRINT(gdcm::ModuleEntry)
 %template(PresentationContextArrayType) std::vector< gdcm::PresentationContext >;
 %template(KeyValuePairType) std::pair< gdcm::Tag, std::string>;
 %template(KeyValuePairArrayType) std::vector< std::pair< gdcm::Tag, std::string> >;
-%template(TagArrayType) std::vector< gdcm::Tag >;
+//%template(TagArrayType) std::vector< gdcm::Tag >;
 %include "gdcmQueryBase.h"
 %include "gdcmBaseRootQuery.h"
 %include "gdcmQueryFactory.h"
