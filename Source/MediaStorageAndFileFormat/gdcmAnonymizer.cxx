@@ -870,38 +870,50 @@ void Anonymizer::ClearInternalUIDs()
 
 bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
 {
+  gdcmDebugMacro( "Start of function");
   // \precondition
   assert( ds.FindDataElement(tag) );
 
   AnonymizeEvent ae;
   ae.SetTag( tag );
   this->InvokeEvent( ae );
+  gdcmDebugMacro( "Anonymize event invoked");
 
 
   bool canempty = CanEmptyTag( tag, iod );
   if( !canempty )
     {
-    DataElement copy;
+     gdcmDebugMacro( "A tag cannot be empty'ed - begin of block");
+
+        DataElement copy;
     copy = ds.GetDataElement( tag );
 
     if ( IsVRUI( tag ) )
       {
+      gdcmDebugMacro( "The following tag is UI" << tag.PrintAsContinuousString());
+
       std::string UIDToAnonymize = "";
       UIDGenerator uid;
 
       if( !copy.IsEmpty() )
         {
+            gdcmDebugMacro( "copy is not empty - begin of block" );
+
         if( const ByteValue *bv = copy.GetByteValue() )
           {
           UIDToAnonymize = std::string( bv->GetPointer(), bv->GetLength() );
           }
+            gdcmDebugMacro( "copy is not empty - end of block" );
         }
 
       std::string anonymizedUID = "";
       if( !UIDToAnonymize.empty() )
         {
+            gdcmDebugMacro( "Requested UID already exists" );
         if ( dummyMapUIDTags.count( UIDToAnonymize ) == 0 )
           {
+              gdcmDebugMacro( "Generate  UID - begin of block" );
+
           if (determinicticUIDs)
             {
             anonymizedUID = uid.Generate(UIDToAnonymize.c_str(), UIDToAnonymize.length(), uid_salt);
@@ -911,6 +923,7 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
             {
             anonymizedUID = uid.Generate();
             }
+              gdcmDebugMacro( "Generate  UID - end of block" );
           }
         else
           {
@@ -921,7 +934,9 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
         {
         // gdcmData/LEADTOOLS_FLOWERS-16-MONO2-JpegLossless.dcm
         // has an empty 0008,0018 attribute, let's try to handle creating new UID
-        anonymizedUID = uid.Generate();
+            gdcmDebugMacro( "Before generating new UID" );
+            anonymizedUID = uid.Generate();
+            gdcmDebugMacro( "After generating new UID" );
         }
 
       copy.SetByteValue( anonymizedUID.c_str(), (uint32_t)anonymizedUID.size() );
@@ -929,6 +944,7 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
       }
     else
       {
+          gdcmDebugMacro( "The following tag is NOT UI" << tag.PrintAsContinuousString());
       TagValueKey tvk;
       tvk.first = tag;
         std::string tagValue;
@@ -943,6 +959,7 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
       assert( dummyMapNonUIDTags.count( tvk ) == 0 || dummyMapNonUIDTags.count( tvk ) == 1 );
       if( dummyMapNonUIDTags.count( tvk ) == 0 )
         {
+            gdcmDebugMacro( "count == 0 - begin of block" );
         std::string ret = DummyValueGenerator::Generate( (tvk.second+uid_salt).c_str() );
 
         static const Global &g = Global::GetInstance();
@@ -970,30 +987,39 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
           }
         else
           dummyMapNonUIDTags[ tvk ] = "";
+        gdcmDebugMacro( "count == 0 - end of block" );
         }
 
       std::string &v = dummyMapNonUIDTags[ tvk ];
       copy.SetByteValue( v.c_str(), (uint32_t)v.size() );
+          gdcmDebugMacro( "The following tag is NOT UI - end of block");
       }
       ds.Replace( copy );
+        gdcmDebugMacro( "A tag cannot be empty'ed - end of block");
     }
   else
     {
     //Empty( tag );
+    gdcmDebugMacro( "Tag is emty:" << tag.PrintAsContinuousString());
     DataElement copy = ds.GetDataElement( tag );
     copy.Empty();
     ds.Replace( copy );
     }
-  return true;
+    gdcmDebugMacro( "End of function");
+    return true;
 }
 
 void Anonymizer::RecurseDataSet( DataSet & ds )
 {
-  if( ds.IsEmpty() ) return;
+    gdcmDebugMacro( "Begin of function" );
+
+    if( ds.IsEmpty() ) return;
 
   static const Global &g = Global::GetInstance();
   static const Defs &defs = g.GetDefs();
   const IOD& iod = defs.GetIODFromFile(*F);
+
+    gdcmDebugMacro( "End of variables initialization" );
 
   for (const auto& tag : BasicApplicationLevelConfidentialityProfileAttributes )
     {
@@ -1003,6 +1029,7 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
       BALCPProtect(ds, tag, iod);
       }
     }
+    gdcmDebugMacro( "End of iteration over tags to remove" );
 
   DataSet::ConstIterator it = ds.Begin();
   for( ; it != ds.End(); /*++it*/ )
@@ -1011,9 +1038,11 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
     DataElement de = *it; ++it;
     //const SequenceOfItems *sqi = de.GetSequenceOfItems();
     VR vr = DataSetHelper::ComputeVR(*F, ds, de.GetTag() );
+    gdcmDebugMacro( "VR computed:" << vr );
     SmartPointer<SequenceOfItems> sqi = nullptr;
     if( vr == VR::SQ )
       {
+      gdcmDebugMacro( "VR is not a Sequence");
       sqi = de.GetValueAsSQ();
       if (! sqi)
         {
@@ -1022,6 +1051,7 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
       }
     if( sqi )
       {
+      gdcmDebugMacro( "VR is a Sequence");
       de.SetValue( *sqi ); // EXTREMELY IMPORTANT #2912092
       de.SetVLToUndefined();
       assert( sqi->IsUndefinedLength() );
@@ -1037,6 +1067,7 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
       ds.Replace( de );
       }
     }
+    gdcmDebugMacro( "End of function");
 
 }
 
