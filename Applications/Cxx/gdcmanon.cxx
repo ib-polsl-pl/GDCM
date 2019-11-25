@@ -948,12 +948,12 @@ int main(int argc, char *argv[])
     anon.SetCryptographicMessageSyntax( cms_ptr );
     anon.SetDeterminicticUIDs( deterministic_uids );
     anon.SetGenerateDummyNames( generate_dummy_names );
-    char salt_data [16] = { 0 };
     if (! salt.empty())
       {
+      char salt_data [16] = { 0 };
       std::strncpy(salt_data, salt.c_str(), salt.length()<=16? salt.length(): 16);
-      }
       anon.SetSalt(salt_data);
+      }
     }
 
   if( dumb_mode )
