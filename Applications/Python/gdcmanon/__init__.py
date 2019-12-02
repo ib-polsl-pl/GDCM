@@ -11,13 +11,14 @@ import sys
 
 # sorry for that, import custom GDCM (LD_LIBRARY_PATH to import shared libs
 #sys.path.insert to import modules)
-sys.path.insert(1, os.getenv('LD_LIBRARY_PATH'))
+if not os.getenv('LD_LIBRARY_PATH') in sys.path:
+    sys.path.insert(1, os.getenv('LD_LIBRARY_PATH'))
 
 import gdcm
 
-gdcm.Trace.DebugOn()
-gdcm.Trace.WarningOn()
-gdcm.Trace.ErrorOn()
+#gdcm.Trace.DebugOn()
+#gdcm.Trace.WarningOn()
+#gdcm.Trace.ErrorOn()
 
 
 def setup():

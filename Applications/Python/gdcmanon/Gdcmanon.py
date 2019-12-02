@@ -49,6 +49,46 @@ sys.path.insert(1, os.getenv('LD_LIBRARY_PATH'))
 
 import gdcm
 
+
+# easier to provide various anonymizing scenarios this way;
+# there is some time penalty, not a big one, though:
+# over 1000 repeats of a small dataset:
+#
+# time example 2>/dev/null
+# 
+# without additional class (similar times over several executions): 
+# 
+# real    0m14,670s
+# user    0m4,329s
+# sys     0m9,110s
+#
+# with additional class (two examples shown, yet usually slower than faster)
+#
+# real    0m14,491s
+# user    0m4,439s
+# sys     0m8,828s
+
+# real    0m15,081s
+# user    0m4,422s
+# sys     0m9,465s
+class AnonWrapper:
+    def __init__(self, anonymizer):
+        self.anonymizer = anonymizer
+    def SetFile(self, file):
+        self.anonymizer.SetFile(file)
+    def GetFile(self):
+        return self.anonymizer.GetFile()
+    def process(self):
+        return self.anonymizer.BasicApplicationLevelConfidentialityProfile(True)
+
+# gdcm.Anonymizer in encryt mode seems not to be thread safe due
+# to using static system::map as memory (for remembering uids, I suppose)
+# there is a suggestion in the code to externalize this map generation.
+# I think, that this may not be a problem with the deterministic UIDs, but
+# BP warns it may hold. So for a moment this seem to be a good idea,
+# 
+# later one may need to convert it to a full builder, and generate
+# Anonymizer during getInstance()/getNewInstance() or whatever
 class Gdcmanon:
     
  
@@ -66,9 +106,9 @@ class Gdcmanon:
             self._cp = self._cf.CreateCMSProvider()
 
             if not self._cp.ParseKeyFile(key):
-                raise ValueError('Key file{key} could not be read')
+                raise ValueError(f'Key file {key} could not be read')
             if not self._cp.ParseCertificateFile(cert):
-                raise ValueError('Certificate file{key} could not be read')
+                raise ValueError(f'Certificate file {cert} could not be read')
 
             # this one could be changes if necessary
             self._cp.SetCipherType(gdcm.CryptographicMessageSyntax.AES256_CIPHER)
@@ -161,3 +201,12 @@ class Gdcmanon:
     
     def getInstance(self):
         return self.anonymizer            
+
+    def getAnonWrapper(self, typeOfWrapper):
+        if typeOfWrapper == "BALCPA":
+            return AnonWrapper(self.anonymizer)
+        else:
+            raise ValueError(f'Unknown type of wrapper {typeOfWrapper}; try: BALCPA' )
+            
+            
+            
