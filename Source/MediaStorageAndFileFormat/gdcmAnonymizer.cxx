@@ -33,7 +33,7 @@ namespace gdcm
 // PS 3.15 - 2008
 // Table E.1-1
 // BALCPA
-static Tag BasicApplicationLevelConfidentialityProfileAttributes[] = {
+static std::vector<Tag> BasicApplicationLevelConfidentialityProfileAttributes = {
 //    Attribute Name                                Tag
 /*    Instance Creator UID                      */ Tag(0x0008,0x0014),
 /*    SOP Instance UID                          */ Tag(0x0008,0x0018),
@@ -431,22 +431,59 @@ bool Anonymizer::BasicApplicationLevelConfidentialityProfile(bool deidentify)
 
 std::vector<Tag> Anonymizer::GetBasicApplicationLevelConfidentialityProfileAttributes()
 {
-  static const unsigned int deidSize = sizeof(Tag);
-  static const unsigned int numDeIds = sizeof(BasicApplicationLevelConfidentialityProfileAttributes) / deidSize;
-  static const Tag *start = BasicApplicationLevelConfidentialityProfileAttributes;
-  static const Tag *end = start + numDeIds;
-  return std::vector<Tag>(start, end);
+  return BasicApplicationLevelConfidentialityProfileAttributes;
+}
+
+void Anonymizer::AddTagToBALCPA(const Tag& tag)
+{
+  BasicApplicationLevelConfidentialityProfileAttributes.push_back(tag);
+}
+
+void Anonymizer::RemoveTagFromBALCPA(const Tag& tag)
+{
+    auto it = std::find(BasicApplicationLevelConfidentialityProfileAttributes.begin(),
+                        BasicApplicationLevelConfidentialityProfileAttributes.end(),
+                        tag);
+    if (it != BasicApplicationLevelConfidentialityProfileAttributes.end()) {
+            BasicApplicationLevelConfidentialityProfileAttributes.erase(it);
+    }
+    else {
+        gdcmWarningMacro((tag.PrintAsContinuousString() + " was not scheduled for removing. Ignoring this Tag.").c_str());
+    }
+}
+
+void Anonymizer::AddTagsToBALCPA(const std::vector<Tag>& tags)
+{
+  for (const auto& ptr : tags)
+    {
+    if (std::find(BasicApplicationLevelConfidentialityProfileAttributes.begin(),
+                  BasicApplicationLevelConfidentialityProfileAttributes.end(),
+                  ptr) == BasicApplicationLevelConfidentialityProfileAttributes.end())
+      {
+      AddTagToBALCPA(ptr);
+      }
+    else
+      {
+      gdcmWarningMacro((ptr.PrintAsContinuousString() + " already scheduled for removing. Ignoring this Tag.").c_str());
+      }
+    }
+}
+
+void Anonymizer::RemoveTagsFromBALCPA(const std::vector<Tag>& tags)
+{
+    for (const auto& ptr : tags)
+    {
+        RemoveTagFromBALCPA(ptr);
+    }
 }
 
 bool Anonymizer::CheckIfSequenceContainsAttributeToAnonymize(File const &file, SequenceOfItems* sqi) const
 {
-  static const unsigned int deidSize = sizeof(Tag);
-  static const unsigned int numDeIds = sizeof(BasicApplicationLevelConfidentialityProfileAttributes) / deidSize;
-  static const Tag *start = BasicApplicationLevelConfidentialityProfileAttributes;
-  static const Tag *end = start + numDeIds;
 
   bool found = false;
-  for(const Tag *ptr = start ; ptr != end && !found ; ++ptr)
+  for(std::vector<Tag>::const_iterator ptr = BasicApplicationLevelConfidentialityProfileAttributes.begin() ;
+  ptr != BasicApplicationLevelConfidentialityProfileAttributes.end() && !found ;
+  ++ptr)
     {
     const Tag& tag = *ptr;
     found = sqi->FindDataElement( tag );
@@ -488,10 +525,6 @@ bool Anonymizer::CheckIfSequenceContainsAttributeToAnonymize(File const &file, S
 // N AnonymizeEvent (depend on number of tag found)
 bool Anonymizer::BasicApplicationLevelConfidentialityProfile1()
 {
-  static const unsigned int deidSize = sizeof(Tag);
-  static const unsigned int numDeIds = sizeof(BasicApplicationLevelConfidentialityProfileAttributes) / deidSize;
-  static const Tag *start = BasicApplicationLevelConfidentialityProfileAttributes;
-  static const Tag *end = start + numDeIds;
   if( !CMS )
     {
     gdcmErrorMacro( "Need a certificate" );
@@ -545,9 +578,8 @@ bool Anonymizer::BasicApplicationLevelConfidentialityProfile1()
   item1.SetVLToUndefined();
   DataSet &encryptedds = item1.GetNestedDataSet();
   // Loop over root level attributes:
-  for(const Tag *ptr = start ; ptr != end ; ++ptr)
+  for (const auto& tag : BasicApplicationLevelConfidentialityProfileAttributes )
     {
-    const Tag& tag = *ptr;
     if( ds.FindDataElement( tag ) )
       encryptedds.Insert( ds.GetDataElement( tag ) );
     }
@@ -767,7 +799,8 @@ static const Tag SpecialTypeTags[] = {
 /*   Patient's Name          */ Tag(0x0010,0x0010),
 /*   Patient ID              */ Tag(0x0010,0x0020),
 /*   Study ID                */ Tag(0x0020,0x0010),
-/*   Series Number           */ Tag(0x0020,0x0011)
+/*   Series Number           */ Tag(0x0020,0x0011),
+/*   Accession number        */ Tag(0x0008,0x0050)
 };
 
 bool Anonymizer::CanEmptyTag(Tag const &tag, const IOD &iod) const
@@ -837,40 +870,60 @@ void Anonymizer::ClearInternalUIDs()
 
 bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
 {
+  gdcmDebugMacro( "Start of function");
   // \precondition
   assert( ds.FindDataElement(tag) );
 
   AnonymizeEvent ae;
   ae.SetTag( tag );
   this->InvokeEvent( ae );
+  gdcmDebugMacro( "Anonymize event invoked");
 
 
   bool canempty = CanEmptyTag( tag, iod );
   if( !canempty )
     {
-    DataElement copy;
+     gdcmDebugMacro( "A tag cannot be empty'ed - begin of block");
+
+        DataElement copy;
     copy = ds.GetDataElement( tag );
 
     if ( IsVRUI( tag ) )
       {
+      gdcmDebugMacro( "The following tag is UI" << tag.PrintAsContinuousString());
+
       std::string UIDToAnonymize = "";
       UIDGenerator uid;
 
       if( !copy.IsEmpty() )
         {
+            gdcmDebugMacro( "copy is not empty - begin of block" );
+
         if( const ByteValue *bv = copy.GetByteValue() )
           {
           UIDToAnonymize = std::string( bv->GetPointer(), bv->GetLength() );
           }
+            gdcmDebugMacro( "copy is not empty - end of block" );
         }
 
       std::string anonymizedUID = "";
       if( !UIDToAnonymize.empty() )
         {
+            gdcmDebugMacro( "Requested UID already exists" );
         if ( dummyMapUIDTags.count( UIDToAnonymize ) == 0 )
           {
-          anonymizedUID = uid.Generate();
-          dummyMapUIDTags[ UIDToAnonymize ] = anonymizedUID;
+              gdcmDebugMacro( "Generate  UID - begin of block" );
+
+          if (determinicticUIDs)
+            {
+            anonymizedUID = uid.Generate(UIDToAnonymize.c_str(), UIDToAnonymize.length(), uid_salt);
+            dummyMapUIDTags[ UIDToAnonymize ] = anonymizedUID;
+            }
+          else
+            {
+            anonymizedUID = uid.Generate();
+            }
+              gdcmDebugMacro( "Generate  UID - end of block" );
           }
         else
           {
@@ -881,7 +934,9 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
         {
         // gdcmData/LEADTOOLS_FLOWERS-16-MONO2-JpegLossless.dcm
         // has an empty 0008,0018 attribute, let's try to handle creating new UID
-        anonymizedUID = uid.Generate();
+            gdcmDebugMacro( "Before generating new UID" );
+            anonymizedUID = uid.Generate();
+            gdcmDebugMacro( "After generating new UID" );
         }
 
       copy.SetByteValue( anonymizedUID.c_str(), (uint32_t)anonymizedUID.size() );
@@ -889,58 +944,92 @@ bool Anonymizer::BALCPProtect(DataSet &ds, Tag const & tag, IOD const & iod)
       }
     else
       {
+          gdcmDebugMacro( "The following tag is NOT UI" << tag.PrintAsContinuousString());
       TagValueKey tvk;
       tvk.first = tag;
-
+        std::string tagValue;
+        if (!copy.IsEmpty())
+          {
+          if (const ByteValue *bv = copy.GetByteValue())
+            {
+            tagValue = std::string(bv->GetPointer(), bv->GetLength());
+            }
+          }
+        tvk.second = tagValue;
       assert( dummyMapNonUIDTags.count( tvk ) == 0 || dummyMapNonUIDTags.count( tvk ) == 1 );
       if( dummyMapNonUIDTags.count( tvk ) == 0 )
         {
-        const char *ret = DummyValueGenerator::Generate( tvk.second.c_str() );
-        if( ret )
+            gdcmDebugMacro( "count == 0 - begin of block" );
+        std::string ret = DummyValueGenerator::Generate( (tvk.second+uid_salt).c_str() );
+
+        static const Global &g = Global::GetInstance();
+        static const Dicts &dicts = g.GetDicts();
+        const DictEntry &dictentry = dicts.GetDictEntry(tag);
+
+        std::stringstream sscopy;
+        if (dictentry.GetVR()==VR::SH)
+        {
+            ret = ret.substr(0,16);
+        }
+        else if (dictentry.GetVR()==VR::IS)
+        {
+            unsigned long retul = std::stoull(ret.substr(0,8), nullptr, 16);
+            ret = std::to_string(retul); 
+            if (ret.length()>12)
+            {
+                ret = ret.substr(0,12);
+            }
+        }
+
+        if( generateDummyNames && ret.length() )
           {
           dummyMapNonUIDTags[ tvk ] = ret;
           }
         else
           dummyMapNonUIDTags[ tvk ] = "";
+        gdcmDebugMacro( "count == 0 - end of block" );
         }
 
       std::string &v = dummyMapNonUIDTags[ tvk ];
       copy.SetByteValue( v.c_str(), (uint32_t)v.size() );
+          gdcmDebugMacro( "The following tag is NOT UI - end of block");
       }
       ds.Replace( copy );
+        gdcmDebugMacro( "A tag cannot be empty'ed - end of block");
     }
   else
     {
     //Empty( tag );
+    gdcmDebugMacro( "Tag is emty:" << tag.PrintAsContinuousString());
     DataElement copy = ds.GetDataElement( tag );
     copy.Empty();
     ds.Replace( copy );
     }
-  return true;
+    gdcmDebugMacro( "End of function");
+    return true;
 }
 
 void Anonymizer::RecurseDataSet( DataSet & ds )
 {
-  if( ds.IsEmpty() ) return;
+    gdcmDebugMacro( "Begin of function" );
 
-  static const unsigned int deidSize = sizeof(Tag);
-  static const unsigned int numDeIds = sizeof(BasicApplicationLevelConfidentialityProfileAttributes) / deidSize;
-  static const Tag *start = BasicApplicationLevelConfidentialityProfileAttributes;
-  static const Tag *end = start + numDeIds;
+    if( ds.IsEmpty() ) return;
 
   static const Global &g = Global::GetInstance();
   static const Defs &defs = g.GetDefs();
   const IOD& iod = defs.GetIODFromFile(*F);
 
-  for(const Tag *ptr = start ; ptr != end ; ++ptr)
+    gdcmDebugMacro( "End of variables initialization" );
+
+  for (const auto& tag : BasicApplicationLevelConfidentialityProfileAttributes )
     {
-    const Tag& tag = *ptr;
     // FIXME Type 1 !
     if( ds.FindDataElement( tag ) )
       {
       BALCPProtect(ds, tag, iod);
       }
     }
+    gdcmDebugMacro( "End of iteration over tags to remove" );
 
   DataSet::ConstIterator it = ds.Begin();
   for( ; it != ds.End(); /*++it*/ )
@@ -949,13 +1038,20 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
     DataElement de = *it; ++it;
     //const SequenceOfItems *sqi = de.GetSequenceOfItems();
     VR vr = DataSetHelper::ComputeVR(*F, ds, de.GetTag() );
+    gdcmDebugMacro( "VR computed:" << vr );
     SmartPointer<SequenceOfItems> sqi = nullptr;
     if( vr == VR::SQ )
       {
+      gdcmDebugMacro( "VR is not a Sequence");
       sqi = de.GetValueAsSQ();
+      if (! sqi)
+        {
+        ds.Remove(de.GetTag());
+        }
       }
     if( sqi )
       {
+      gdcmDebugMacro( "VR is a Sequence");
       de.SetValue( *sqi ); // EXTREMELY IMPORTANT #2912092
       de.SetVLToUndefined();
       assert( sqi->IsUndefinedLength() );
@@ -968,9 +1064,10 @@ void Anonymizer::RecurseDataSet( DataSet & ds )
         DataSet &nested = item.GetNestedDataSet();
         RecurseDataSet( nested );
         }
+      ds.Replace( de );
       }
-    ds.Replace( de );
     }
+    gdcmDebugMacro( "End of function");
 
 }
 
@@ -1136,9 +1233,25 @@ void Anonymizer::SetCryptographicMessageSyntax(CryptographicMessageSyntax *cms)
   CMS = cms;
 }
 
+void Anonymizer::SetGenerateDummyNames(bool generate_names) {
+    generateDummyNames = generate_names;
+}
+
 const CryptographicMessageSyntax *Anonymizer::GetCryptographicMessageSyntax() const
 {
   return CMS;
 }
+
+void Anonymizer::SetDeterminicticUIDs(bool isDeterministic)
+{
+  determinicticUIDs = isDeterministic;
+}
+
+void Anonymizer::SetSalt(char* salt) {
+    for (int i=0; i<sizeof(uid_salt) && i<16; ++i) {
+        uid_salt[i] = *salt++;
+    }
+}
+
 
 } // end namespace gdcm

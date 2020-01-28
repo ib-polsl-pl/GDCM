@@ -77,7 +77,7 @@ class CryptographicMessageSyntax;
 class GDCM_EXPORT Anonymizer : public Subject
 {
 public:
-  Anonymizer():F(new File),CMS(nullptr) {}
+  Anonymizer():F(new File),CMS(nullptr),determinicticUIDs(false),uid_salt{'\0'},generateDummyNames(false) {}
   ~Anonymizer() override;
 
   /// Make Tag t empty (if not found tag will be created)
@@ -114,6 +114,10 @@ public:
   // TODO:
   // bool Remove( PRIVATE_TAGS | GROUP_LENGTH | RETIRED );
 
+  void SetDeterminicticUIDs(bool isDeterministic);
+  void SetSalt(char* salt);
+  void SetGenerateDummyNames(bool generate_names);
+
   /// Set/Get File
   void SetFile(const File& f) { F = f; }
   //const File &GetFile() const { return *F; }
@@ -134,6 +138,18 @@ public:
 
   /// Return the list of Tag that will be considered when anonymizing a DICOM file.
   static std::vector<Tag> GetBasicApplicationLevelConfidentialityProfileAttributes();
+
+  /// Add one tag to the list of Tag that will be considered during anonymization
+  static void AddTagToBALCPA(const Tag& tag);
+
+  /// Remove one tag from the list of Tags that will be considered during anonymization
+  static void RemoveTagFromBALCPA(const Tag& tag);
+
+  /// Add some tags to the list of Tag that will be considered during anonymization
+  static void AddTagsToBALCPA(const std::vector<Tag>& tags);
+
+  /// Remove some tags from the list of Tag that will be considered during anonymization
+  static void RemoveTagsFromBALCPA(const std::vector<Tag>& tags);
 
   /// Clear the internal mapping of real UIDs to generated UIDs
   /// \warning the mapping is definitely lost
@@ -160,6 +176,9 @@ private:
   typedef std::map< std::string, std::string > DummyMapUIDTags;
   static DummyMapNonUIDTags dummyMapNonUIDTags;
   static DummyMapUIDTags dummyMapUIDTags;
+  bool determinicticUIDs;
+  char uid_salt [16];
+  bool generateDummyNames;
 };
 
 /**

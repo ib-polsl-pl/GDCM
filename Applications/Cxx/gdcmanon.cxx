@@ -28,6 +28,8 @@
 #include "gdcmGlobal.h"
 #include "gdcmDefs.h"
 #include "gdcmDirectory.h"
+#include "gdcmDict.h"
+#include "gdcmDicts.h"
 
 #include <getopt.h>
 
@@ -43,16 +45,34 @@ static void PrintVersion()
   int deidentify = 0;
   int reidentify = 0;
 
+static std::string getTagName( const gdcm::Tag & tag )
+{
+    std::string retVal;
+
+    const gdcm::Global& g = gdcm::Global::GetInstance();
+    const gdcm::Dicts &dicts = g.GetDicts();
+    const gdcm::Dict &pubdict = dicts.GetPublicDict();
+    gdcm::DictEntry ent = pubdict.GetDictEntry(tag);
+
+    if (ent.GetVR() != gdcm::VR::INVALID ) {
+        retVal = ent.GetName();
+    }
+    else {
+        retVal = "UNKNOWN OR INVALID VR";
+    }
+
+    return retVal;
+}
 
 static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, const char *outfilename,
-  std::vector<gdcm::Tag> const &empty_tags, std::vector<gdcm::Tag> const &remove_tags, std::vector< std::pair<gdcm::Tag, std::string> > const & replace_tags, bool continuemode = false)
+  std::vector<gdcm::Tag> const &empty_tags, std::vector<gdcm::Tag> const &remove_tags, std::vector< std::pair<gdcm::Tag, std::string> > const & replace_tags, bool continuemode = false, bool ignoreerrors=false)
 {
   gdcm::Reader reader;
   reader.SetFileName( filename );
   if( !reader.Read() )
     {
     std::cerr << "Could not read : " << filename;
-    if( continuemode )
+    if( continuemode || ignoreerrors )
       {
       std::cerr << " -> Skipping from anonymization process (continue mode)." << std::endl;
       return true;
@@ -94,7 +114,8 @@ static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, c
   gdcm::Writer writer;
   writer.SetFileName( outfilename );
   writer.SetFile( file );
-  if( !writer.Write() )
+  success = success && writer.Write();
+  if( !success )
     {
     std::cerr << "Could not Write : " << outfilename << std::endl;
     if( strcmp(filename,outfilename) != 0 )
@@ -105,20 +126,27 @@ static bool AnonymizeOneFileDumb(gdcm::Anonymizer &anon, const char *filename, c
       {
       std::cerr << "gdcmanon just corrupted: " << filename << " for you (data lost)." << std::endl;
       }
-
-    return false;
+    if( ignoreerrors )
+      {
+      return true;
+      }
+    else
+      {
+      std::cerr << " -> Check [--ignore-errors] option for skipping errors." << std::endl;
+      return false;
+      }
     }
-  return success;
+  return true;
 }
 
-static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, bool continuemode = false)
+static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const char *outfilename, std::vector<gdcm::Tag> const &encrypt_tags = {}, std::vector<gdcm::Tag> const &preserve_tags = {}, bool continuemode = false, bool ignoreerrors=false, bool removePrivateTags = false)
 {
   gdcm::Reader reader;
   reader.SetFileName( filename );
   if( !reader.Read() )
     {
     std::cerr << "Could not read : " << filename << std::endl;
-    if( continuemode )
+    if( continuemode || ignoreerrors )
       {
       std::cerr << "Skipping from anonymization process (continue mode)." << std::endl;
       return true;
@@ -130,43 +158,72 @@ static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const
       }
     }
   gdcm::File &file = reader.GetFile();
+  bool success = true;
   gdcm::MediaStorage ms;
   ms.SetFromFile(file);
   if( !gdcm::Defs::GetIODNameFromMediaStorage(ms) )
     {
     std::cerr << "The Media Storage Type of your file is not supported: " << ms << std::endl;
     std::cerr << "Please report" << std::endl;
-    return false;
+    success = false;
+    if (! ignoreerrors)
+      {
+      return false;
+      }
     }
-
   anon.SetFile( file );
-
-  if( deidentify )
+  if (success)
     {
-    //anon.RemovePrivateTags();
-    //anon.RemoveRetired();
-    if( !anon.BasicApplicationLevelConfidentialityProfile( true ) )
+    if( deidentify )
       {
-      std::cerr << "Could not De-indentify : " << filename << std::endl;
-      return false;
+      if( removePrivateTags )
+        {
+        success = success && anon.RemovePrivateTags();
+        }
+      //anon.RemoveRetired();
+      if (encrypt_tags.size() > 0 )
+        {
+        anon.AddTagsToBALCPA(encrypt_tags);
+        }
+      if (preserve_tags.size() > 0)
+        {
+        anon.RemoveTagsFromBALCPA(preserve_tags);
+        }
+      if( !anon.BasicApplicationLevelConfidentialityProfile( true ) )
+        {
+        std::cerr << "Could not De-indentify : " << filename << std::endl;
+        success = false;
+        if (! ignoreerrors)
+          {
+          return false;
+          }
+        }
+      }
+    else if ( reidentify )
+      {
+      if( !anon.BasicApplicationLevelConfidentialityProfile( false ) )
+        {
+        std::cerr << "Could not Re-indentify : " << filename << std::endl;
+        success = false;
+        if (! ignoreerrors)
+          {
+          return false;
+          }
+        }
       }
     }
-  else if ( reidentify )
+  if (success)
     {
-    if( !anon.BasicApplicationLevelConfidentialityProfile( false ) )
-      {
-      std::cerr << "Could not Re-indentify : " << filename << std::endl;
-      return false;
-      }
+    gdcm::FileMetaInformation &fmi = file.GetHeader();
+    fmi.Clear();
+  
+    gdcm::Writer writer;
+    writer.SetFileName( outfilename );
+    writer.SetFile( file );
+    success = success && writer.Write();
     }
 
-  gdcm::FileMetaInformation &fmi = file.GetHeader();
-  fmi.Clear();
-
-  gdcm::Writer writer;
-  writer.SetFileName( outfilename );
-  writer.SetFile( file );
-  if( !writer.Write() )
+  if( !success )
     {
     std::cerr << "Could not Write : " << outfilename << std::endl;
     if( strcmp(filename,outfilename) != 0 )
@@ -177,10 +234,18 @@ static bool AnonymizeOneFile(gdcm::Anonymizer &anon, const char *filename, const
       {
       std::cerr << "gdcmanon just corrupted: " << filename << " for you (data lost)." << std::endl;
       }
-
-    return false;
+    if( ignoreerrors )
+      {
+      return true;
+      }
+    else
+      {
+      std::cerr << " -> Check [--ignore-errors] option for skipping errors." << std::endl;
+      return false;
+      }
     }
   return true;
+
 }
 
 static bool GetRSAKeys(gdcm::CryptographicMessageSyntax &cms, const char *privpath = nullptr, const char *certpath = nullptr)
@@ -220,16 +285,24 @@ static void PrintHelp()
   std::cout << "  -o --output                 DICOM filename / directory" << std::endl;
   std::cout << "  -r --recursive              recursively process (sub-)directories." << std::endl;
   std::cout << "     --continue               Do not stop when file found is not DICOM." << std::endl;
+  std::cout << "     --ignore-errors          Do not stop when an error occurs." << std::endl;
   std::cout << "     --root-uid               Root UID." << std::endl;
   std::cout << "     --resources-path         Resources path." << std::endl;
   std::cout << "  -k --key                    Path to RSA Private Key." << std::endl;
   std::cout << "  -c --certificate            Path to Certificate." << std::endl;
   std::cout << "  -p --password               Encryption passphrase." << std::endl;
+  std::cout << "  -n --generate-dummy-names   Generate PatientName, StudyID etc." << std::endl;
+  std::cout << "  -t --remove-private-tags    Remove all Private Tags." << std::endl;
+  std::cout << "  -N --encrypt-tag %d,%d      additional DICOM tag(s) to encrypt" << std::endl;
+  std::cout << "  -T --preserve-tag %d,%d     DICOM tag to preserve from anonymization" << std::endl;
+  std::cout << "  -P --print-tags-to-anon     Print DICOM tags scheduled to anonymization (encryption)" << std::endl;
   std::cout << "Crypto Library Options:" << std::endl;
   std::cout << "  --crypto=" << std::endl;
   std::cout << "           openssl            OpenSSL (default on non-Windows systems)." << std::endl;
   std::cout << "           capi               Microsoft CryptoAPI (default on Windows systems)." << std::endl;
   std::cout << "           openssl-p7         Old OpenSSL implementation." << std::endl;
+  std::cout << "  -g --generate-uuids         Generate UIDs based on UUID version 5." << std::endl;
+  std::cout << "  -s --salt                   Use salt for UUIDs (see -g)." << std::endl;
   std::cout << "Encryption Algorithm Options:" << std::endl;
   std::cout << "     --des3                   Triple DES." << std::endl;
   std::cout << "     --aes128                 AES 128." << std::endl;
@@ -292,6 +365,7 @@ int main(int argc, char *argv[])
   std::string rsa_path;
   std::string cert_path;
   std::string password;
+  std::string salt;
   int resourcespath = 0;
   int dumb_mode = 0;
   int des3 = 0;
@@ -307,12 +381,19 @@ int main(int argc, char *argv[])
   int version = 0;
   int recursive = 0;
   int continuemode = 0;
+  int ignoreerrors = 0;
   int empty_tag = 0;
   int remove_tag = 0;
+  int encrypt_tag = 0;
   int replace_tag = 0;
   int crypto_api = 0;
+  int generate_dummy_names = 0;
+  int remove_private_tags = 0;
+  bool deterministic_uids = false;
   std::vector<gdcm::Tag> empty_tags;
   std::vector<gdcm::Tag> remove_tags;
+  std::vector<gdcm::Tag> encrypt_tags;
+  std::vector<gdcm::Tag> preserve_tags;
   std::vector< std::pair<gdcm::Tag, std::string> > replace_tags_value;
   gdcm::Tag tag;
   gdcm::CryptoFactory::CryptoLib crypto_lib;
@@ -352,10 +433,19 @@ int main(int argc, char *argv[])
         {"help", no_argument, nullptr, 'h'},
         {"version", no_argument, nullptr, 'v'},
 
+        {"encrypt-tag", required_argument, &encrypt_tag, 'N'},
+        {"preserve-tag", required_argument, &encrypt_tag, 'T'},
+        {"generate-dummy-names", no_argument, &generate_dummy_names, 'n'},
+        {"generate-uuids", no_argument, nullptr, 'g'},
+        {"salt", required_argument, nullptr, 's'},
+        {"remove-private-tags", no_argument, nullptr, 't'},
+        {"ignore-errors", no_argument, &ignoreerrors, 1},
+        {"print-tags-to-anon", no_argument, nullptr, 'P'},
+
         {nullptr, 0, nullptr, 0}
     };
 
-    c = getopt_long (argc, argv, "i:o:rdek:c:p:VWDEhv",
+    c = getopt_long (argc, argv, "i:o:rdek:c:p:VWDEhvngts:T:N:P",
       long_options, &option_index);
     if (c == -1)
       {
@@ -509,6 +599,10 @@ int main(int argc, char *argv[])
       reidentify = 1;
       break;
 
+    case 'g': // generate-deterministic-uids
+      deterministic_uids = true;
+      break;
+
     case 'V':
       verbose = 1;
       break;
@@ -532,6 +626,52 @@ int main(int argc, char *argv[])
     case 'v':
       version = 1;
       break;
+
+    case 'n':
+      generate_dummy_names = 1;
+      break;
+
+    case 't':
+      remove_private_tags = 1;
+      break;
+
+    case 's':
+      assert( salt.empty() );
+      if (std::strlen(optarg)>16)
+        {
+        std::cerr << "The length of `salt` shall not be greater than 16 chars. Terminating." << std::endl;
+        return 1;
+        }
+      salt = optarg;
+      break;
+
+    case 'N':
+      if( !tag.ReadFromCommaSeparatedString(optarg) )
+      {
+          std::cerr << "Could not read Tag: " << optarg << std::endl;
+          return 1;
+      }
+      encrypt_tags.push_back( tag );
+      break;
+
+    case 'T':
+      if( !tag.ReadFromCommaSeparatedString(optarg) )
+      {
+        std::cerr << "Could not read Tag: " << optarg << std::endl;
+        return 1;
+      }
+      preserve_tags.push_back( tag );
+      break;
+
+    case 'P':
+      {
+          std::cerr << "Default list of Tags scheduled for anonymization (ignores -N or -T flags).\n";
+          for (const auto& i: gdcm::Anonymizer::GetBasicApplicationLevelConfidentialityProfileAttributes()) {
+              std::cerr << i.PrintAsPipeSeparatedString() << "    " << getTagName(i) << '\n';
+          }
+
+          std::cerr << '\n';
+      }
 
     case '?':
       break;
@@ -806,6 +946,14 @@ int main(int argc, char *argv[])
   if( !dumb_mode )
     {
     anon.SetCryptographicMessageSyntax( cms_ptr );
+    anon.SetDeterminicticUIDs( deterministic_uids );
+    anon.SetGenerateDummyNames( generate_dummy_names );
+    if (! salt.empty())
+      {
+      char salt_data [16] = { 0 };
+      std::strncpy(salt_data, salt.c_str(), salt.length()<=16? salt.length(): 16);
+      anon.SetSalt(salt_data);
+      }
     }
 
   if( dumb_mode )
@@ -814,7 +962,7 @@ int main(int argc, char *argv[])
       {
       const char *in  = filenames[i].c_str();
       const char *out = outfilenames[i].c_str();
-      if( !AnonymizeOneFileDumb(anon, in, out, empty_tags, remove_tags, replace_tags_value, (continuemode > 0 ? true: false)) )
+      if( !AnonymizeOneFileDumb(anon, in, out, empty_tags, remove_tags, replace_tags_value, continuemode>0, ignoreerrors!=0 ))
         {
         //std::cerr << "Could not anonymize: " << in << std::endl;
         delete cms_ptr;
@@ -828,7 +976,7 @@ int main(int argc, char *argv[])
       {
       const char *in  = filenames[i].c_str();
       const char *out = outfilenames[i].c_str();
-      if( !AnonymizeOneFile(anon, in, out, (continuemode > 0 ? true: false)) )
+      if( !AnonymizeOneFile(anon, in, out, encrypt_tags, preserve_tags, continuemode>0, ignoreerrors!=0, remove_private_tags!=0 ))
         {
         //std::cerr << "Could not anonymize: " << in << std::endl;
         delete cms_ptr;
